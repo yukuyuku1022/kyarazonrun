@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kyarazon RUN - Urban Road Edition</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050510; font-family: sans-serif; }
+        canvas { display: block; }
+        #ui {
+            position: absolute; top: 20px; left: 20px; color: #eee;
+            background: rgba(0,0,0,0.7); padding: 15px; border-radius: 8px;
+            pointer-events: none; min-width: 120px; z-index: 10;
+        }
+        #missionUI {
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 8px; background: rgba(0,0,0,0.6); padding: 10px 20px;
+            border-radius: 50px; z-index: 10; align-items: center; border: 1px solid #555;
+        }
+        .box-icon {
+            width: 25px; height: 20px; background-color: #d2a679;
+            border: 1px solid #8b5a2b; position: relative;
+        }
+        .box-icon::after {
+            content: ""; position: absolute; top: 50%; left: 0; width: 100%; height: 1px; background: #8b5a2b;
+        }
+        .mission-label { color: white; font-weight: bold; margin-right: 10px; font-size: 14px; letter-spacing: 1px; }
+
+        #timeVal { color: #ff4444; font-size: 1.2em; font-weight: bold; }
+        #hpVal { color: #ff44aa; font-size: 1.2em; }
+
+        .overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            background: rgba(0,0,0,0.85); z-index: 20; color: white; overflow-y: auto;
+        }
+        .overlay-msg { 
+            font-size: 48px; font-weight: bold; margin-bottom: 20px; 
+            text-shadow: 0 0 15px rgba(0,212,255,0.6); letter-spacing: 2px;
+        }
+        
+        .instruction-card {
+            background: rgba(255, 255, 255, 0.1); padding: 20px 40px; border-radius: 15px;
+            max-width: 600px; margin-bottom: 30px; line-height: 1.6; font-size: 15px;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .instruction-card h3 { color: #00d4ff; margin-top: 0; border-bottom: 1px solid #444; padding-bottom: 5px; }
+        .instruction-card ul { padding-left: 20px; margin: 10px 0; }
+        .instruction-card li { margin-bottom: 8px; }
+        .highlight { color: #ffd700; font-weight: bold; }
+
+        .btn-container { display: flex; flex-direction: column; gap: 15px; align-items: center; }
+        .btn {
+            padding: 15px 40px; font-size: 20px; font-weight: bold; cursor: pointer;
+            border: none; border-radius: 50px; transition: transform 0.2s, background-color 0.2s;
+            min-width: 280px;
+        }
+        .btn-primary { background-color: #00d4ff; color: #1a1a1a; }
+        .btn-secondary { background-color: #555; color: white; }
+        .btn:hover { transform: scale(1.05); filter: brightness(1.1); }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        HP: <span id="hpVal">❤️❤️❤️</span><br>
+        TIME: <span id="timeVal">180.00</span>
+    </div>
+
+    <div id="missionUI">
+        <span class="mission-label">DELIVERY:</span>
+        <div id="boxContainer" style="display: flex; gap: 5px;"></div>
+    </div>
+
+    <div id="titleScreen" class="overlay">
+        <div class="overlay-msg">Kyarazon RUN</div>
+        <div class="instruction-card">
+            <h3>配達ミッション開始！</h3>
+            <p>あなたは配達員です。制限時間内に<span class="highlight">10個の荷物</span>を家々に届けてください。</p>
+            <ul>
+                <li><span class="highlight">操作:</span> [↑][↓]キーで階段移動、[Space]でジャンプ。</li>
+                <li><span class="highlight">一時停止:</span> [Esc]キーでポーズ。</li>
+                <li><span class="highlight">上段:</span> 安全ですが、家がほとんど現れません。</li>
+                <li><span class="highlight">中段:</span> 歩行者が多く、ぶつかると減速します。</li>
+                <li><span class="highlight">下段:</span> バスが走行中。飛び乗って回避可能です。</li>
+                <li><span class="highlight">勝利条件:</span> タイムアップ前に10件の配達を完了させること。</li>
+            </ul>
+        </div>
+        <button class="btn btn-primary" id="startBtn">配達を開始する</button>
+    </div>
+
+    <div id="pauseScreen" class="overlay" style="display: none;">
+        <div class="overlay-msg">PAUSE</div>
+        <div class="btn-container">
+            <button class="btn btn-primary" id="resumeBtn">ゲームを再開する</button>
+            <button class="btn btn-secondary" id="backToTitleBtn">スタート画面に戻る</button>
+        </div>
+    </div>
+
+    <div id="gameOverScreen" class="overlay" style="display: none;">
+        <div class="overlay-msg">GAME OVER</div>
+        <button class="btn btn-primary" onclick="location.reload()">タイトルに戻る</button>
+    </div>
+
+    <div id="gameClearScreen" class="overlay" style="display: none;">
+        <div class="overlay-msg" style="color:#ffd700">MISSION COMPLETE!</div>
+        <button class="btn btn-primary" onclick="location.reload()">タイトルに戻る</button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const boxContainer = document.getElementById('boxContainer');
+
+const LANE_COUNT = 3;
+const LANE_HEIGHT = 120;
+const STAIR_WIDTH = 150;
+const INITIAL_SPEED = 5.0;
+
+let gameState = 'TITLE';
+let isPaused = false;
+let moveSpeed = INITIAL_SPEED;
+let timeLeft = 180.0; 
+let hp = 3;
+let deliveryQuota = 10;
+let invincibleFrame = 0;
+
+const player = {
+    x: 100, lane: 1, currentY: 0, jumpY: 0, jumpVY: 0, isJumping: false,
+    width: 50, height: 75, isChangingLane: false, transitionTargetLane: 1, activeStairId: null
+};
+
+let stairs = [], cars = [], pedestrians = [], houses = [], backgroundElements = [], foregroundHouses = [];
+
+function generateObjects() {
+    backgroundElements = [];
+    for (let i = 0; i < 150; i++) {
+        backgroundElements.push({
+            x: i * 400 + Math.random() * 200,
+            width: 100 + Math.random() * 200,
+            height: 200 + Math.random() * 400,
+            color: `rgba(15, 15, 40, ${0.5 + Math.random() * 0.3})`
+        });
+    }
+
+    foregroundHouses = [];
+    for (let i = 0; i < 200; i++) {
+        foregroundHouses.push({
+            x: i * 300 + Math.random() * 100,
+            width: 140 + Math.random() * 60,
+            height: 90 + Math.random() * 50,
+            color: `hsl(${210 + Math.random() * 30}, 25%, ${15 + Math.random() * 10}%)`,
+            roofColor: `hsl(${0 + Math.random() * 20}, 30%, 10%)`
+        });
+    }
+
+    stairs = [];
+    for (let l = 0; l < LANE_COUNT; l++) {
+        let currentX = 800;
+        for (let i = 0; i < 600; i++) {
+            currentX += Math.floor(Math.random() * 800) + 1000;
+            let type = (l === 0) ? 'DOWN' : (l === 2) ? 'UP' : (Math.random() > 0.5 ? 'UP' : 'DOWN');
+            stairs.push({ id: stairs.length, x: currentX, lane: l, type: type });
+        }
+    }
+
+    cars = []; let cx = 2000;
+    for (let i = 0; i < 200; i++) {
+        cx += Math.floor(Math.random() * 1500) + 3000;
+        cars.push({ x: cx, lane: 2, width: 160, height: 75, speed: -5.5 });
+    }
+
+    pedestrians = []; let px = 1200;
+    for (let i = 0; i < 300; i++) {
+        px += Math.floor(Math.random() * 600) + 1500;
+        const count = Math.random() < 0.1 ? 5 : Math.floor(Math.random() * 3) + 1;
+        for (let j = 0; j < count; j++) {
+            pedestrians.push({ 
+                x: px + (j * 45), lane: 1, width: 35, height: 65, speed: -3.8, 
+                color: `hsl(${Math.random() * 360}, 50%, 50%)` 
+            });
+        }
+    }
+
+    houses = []; let hx = 2000;
+    const houseColors = ['#5d4037', '#455a64', '#3e2723', '#263238'];
+    for (let i = 0; i < 600; i++) {
+        hx += Math.floor(Math.random() * 1200) + 1500;
+        let lane = Math.random() < 0.6 ? 2 : (Math.random() < 0.9 ? 1 : 0);
+        houses.push({ 
+            x: hx, lane: lane, width: 110, height: 110, visited: false, 
+            color: houseColors[Math.floor(Math.random() * houseColors.length)] 
+        });
+    }
+}
+
+function drawRoadSystem(ctx, offsetX, centerY) {
+    const roadTop = centerY - LANE_HEIGHT;
+    const roadBottom = centerY + LANE_HEIGHT * 2;
+    const roadWidth = canvas.width;
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, roadTop, roadWidth, LANE_HEIGHT * 3);
+    ctx.fillStyle = '#444';
+    ctx.fillRect(0, roadTop - 8, roadWidth, 8);
+    ctx.fillRect(0, roadBottom, roadWidth, 8);
+    ctx.fillStyle = '#666';
+    ctx.fillRect(0, roadTop - 8, roadWidth, 2);
+    ctx.fillRect(0, roadBottom + 6, roadWidth, 2);
+    ctx.save();
+    ctx.setLineDash([40, 40]);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = 4;
+    ctx.lineDashOffset = -offsetX;
+    for (let i = 1; i < LANE_COUNT; i++) {
+        const y = centerY + (i - 1) * LANE_HEIGHT;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+
+function drawPlayer(ctx, x, y) {
+    if (invincibleFrame > 0 && Math.floor(invincibleFrame / 5) % 2 === 0) return;
+    ctx.fillStyle = '#222'; ctx.fillRect(x - 18, y + 25, 22, 35);
+    ctx.fillStyle = '#00d4ff'; ctx.fillRect(x, y + 35, 35, 30);
+    ctx.fillStyle = '#ffe0bd'; ctx.beginPath(); ctx.arc(x + 18, y + 20, 18, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(x + 18, y + 15, 19, Math.PI, 0); ctx.fill();
+}
+
+function drawPedestrian(ctx, p, centerY) {
+    const y = centerY + (p.lane - 1) * LANE_HEIGHT - p.height;
+    ctx.fillStyle = '#ffe0bd'; ctx.beginPath(); ctx.arc(p.x + p.width/2, y + 15, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = p.color; ctx.fillRect(p.x, y + 27, p.width, 30);
+}
+
+function drawCarDetailed(ctx, car, centerY) {
+    const y = centerY + (car.lane - 1) * LANE_HEIGHT - car.height;
+    ctx.fillStyle = '#2c3e50'; ctx.beginPath(); ctx.roundRect(car.x, y + 5, car.width, car.height - 10, 10); ctx.fill();
+    ctx.fillStyle = '#add8e6'; ctx.fillRect(car.x + 10, y + 15, 30, 25);
+    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(car.x + 30, y + 68, 15, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(car.x + car.width - 30, y + 68, 15, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawHouseDetailed(ctx, h, centerY) {
+    const y = centerY + (h.lane - 1) * LANE_HEIGHT - h.height;
+    ctx.globalAlpha = h.visited ? 0.2 : 1.0;
+    ctx.fillStyle = h.color; ctx.fillRect(h.x, y, h.width, h.height);
+    ctx.fillStyle = '#212121'; ctx.beginPath(); ctx.moveTo(h.x-10, y+5); ctx.lineTo(h.x+h.width/2, y-45); ctx.lineTo(h.x+h.width+10, y+5); ctx.fill();
+    ctx.fillStyle = '#fff9c4'; ctx.fillRect(h.x + 15, y + 25, 35, 30);
+    ctx.globalAlpha = 1.0;
+}
+
+function update() {
+    if (gameState === 'PLAYING' && !isPaused) {
+        timeLeft -= 1/60; 
+        if (timeLeft <= 0) { gameState = 'GAMEOVER'; document.getElementById('gameOverScreen').style.display = 'flex'; }
+        document.getElementById('timeVal').innerText = Math.max(0, timeLeft).toFixed(2);
+        if (invincibleFrame > 0) invincibleFrame--;
+        moveSpeed += 0.0003;
+        
+        let speedPenalty = 1.0;
+        pedestrians.forEach(p => {
+            p.x += p.speed;
+            if (!player.isJumping && player.lane === 1 && Math.abs(player.x - p.x) < 35) speedPenalty *= 0.82; 
+        });
+
+        player.x += moveSpeed * speedPenalty;
+        const centerY = canvas.height / 2;
+        let baseTargetY = centerY + (player.lane - 1) * LANE_HEIGHT;
+
+        if (player.isChangingLane) {
+            const s = stairs.find(st => st.id === player.activeStairId);
+            if (s) {
+                let progress = Math.max(0, Math.min(1, (player.x + player.width - s.x) / STAIR_WIDTH));
+                const startY = centerY + (player.lane - 1) * LANE_HEIGHT;
+                const endY = centerY + (player.transitionTargetLane - 1) * LANE_HEIGHT;
+                baseTargetY = startY + (endY - startY) * progress;
+                if (progress >= 1) { player.lane = player.transitionTargetLane; player.isChangingLane = false; }
+            }
+        }
+
+        if (player.isJumping) {
+            player.jumpY += player.jumpVY; player.jumpVY += 0.4;
+            if (player.jumpY >= 0) { player.jumpY = 0; player.isJumping = false; }
+        }
+        player.currentY = baseTargetY - player.height;
+
+        cars.forEach(car => {
+            car.x += car.speed;
+            const py = player.currentY + player.jumpY;
+            const cy = centerY + (car.lane-1)*LANE_HEIGHT - car.height;
+            if (player.x < car.x + car.width && player.x + player.width > car.x && py < cy + car.height && py + player.height > cy) {
+                if (player.isJumping && player.jumpVY > 0 && py + player.height < cy + 30) {
+                    player.jumpVY = -12; player.lane = 1; player.isChangingLane = false;
+                } else if (invincibleFrame === 0) {
+                    hp--; invincibleFrame = 90; updateHPDisplay();
+                    if (hp <= 0) { gameState = 'GAMEOVER'; document.getElementById('gameOverScreen').style.display = 'flex'; }
+                }
+            }
+        });
+
+        houses.forEach(h => {
+            if (!h.visited && player.lane === h.lane && player.x < h.x + h.width && player.x + player.width > h.x) {
+                h.visited = true; deliveryQuota--; updateMissionUI();
+                if (deliveryQuota <= 0) { gameState = 'GAMECLEAR'; document.getElementById('gameClearScreen').style.display = 'flex'; }
+            }
+        });
+    }
+    draw();
+    requestAnimationFrame(update);
+}
+
+function draw() {
+    const offsetX = canvas.width / 2 - player.x;
+    const centerY = canvas.height / 2;
+    ctx.fillStyle = '#0a0a1a'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.translate(offsetX * 0.2, 0); 
+    backgroundElements.forEach(b => {
+        ctx.fillStyle = b.color; ctx.fillRect(b.x, centerY - b.height + 150, b.width, b.height);
+    });
+    ctx.restore();
+    drawRoadSystem(ctx, offsetX, centerY);
+    ctx.save();
+    ctx.translate(offsetX, 0);
+    stairs.forEach(s => {
+        const startY = centerY + (s.lane - 1) * LANE_HEIGHT;
+        const endY = (s.type === 'UP') ? startY - LANE_HEIGHT : startY + LANE_HEIGHT;
+        ctx.fillStyle = s.type === 'UP' ? 'rgba(0, 212, 255, 0.4)' : 'rgba(255, 0, 150, 0.4)'; 
+        ctx.beginPath(); ctx.moveTo(s.x, startY); ctx.lineTo(s.x + STAIR_WIDTH, endY);
+        ctx.lineTo(s.x + STAIR_WIDTH + 40, endY); ctx.lineTo(s.x + 40, startY); ctx.fill();
+    });
+    houses.forEach(h => { if (Math.abs(h.x - player.x) < canvas.width) drawHouseDetailed(ctx, h, centerY); });
+    pedestrians.forEach(p => { if (Math.abs(p.x - player.x) < canvas.width) drawPedestrian(ctx, p, centerY); });
+    cars.forEach(car => { if (Math.abs(car.x - player.x) < canvas.width + 200) drawCarDetailed(ctx, car, centerY); });
+    drawPlayer(ctx, player.x, player.currentY + player.jumpY);
+    ctx.restore();
+    ctx.save();
+    ctx.translate(offsetX * 1.6, 0);
+    foregroundHouses.forEach(fh => {
+        const y = centerY + LANE_HEIGHT * 2 + 20; 
+        ctx.fillStyle = fh.color; ctx.fillRect(fh.x, y, fh.width, fh.height);
+        ctx.fillStyle = fh.roofColor; ctx.beginPath(); ctx.moveTo(fh.x-10, y); ctx.lineTo(fh.x+fh.width/2, y-35); ctx.lineTo(fh.x+fh.width+10, y); ctx.fill();
+    });
+    ctx.restore();
+}
+
+function updateHPDisplay() { document.getElementById('hpVal').innerText = "❤️".repeat(hp) || "DEAD"; }
+function updateMissionUI() {
+    boxContainer.innerHTML = '';
+    for (let i = 0; i < deliveryQuota; i++) {
+        const box = document.createElement('div'); box.className = 'box-icon'; boxContainer.appendChild(box);
+    }
+}
+
+function togglePause() {
+    if (gameState !== 'PLAYING') return;
+    isPaused = !isPaused;
+    document.getElementById('pauseScreen').style.display = isPaused ? 'flex' : 'none';
+}
+
+window.addEventListener('resize', () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; });
+window.addEventListener('keydown', e => {
+    if (gameState === 'TITLE' && e.key === ' ') { e.preventDefault(); startGame(); }
+    
+    // Pause handling
+    if (e.key === 'Escape') { 
+        e.preventDefault(); 
+        togglePause(); 
+    }
+    
+    if (gameState !== 'PLAYING' || isPaused) return;
+    
+    if (e.key === ' ') { 
+        if (!player.isJumping) { player.jumpVY = -11; player.isJumping = true; } 
+    }
+    else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        const s = stairs.find(st => st.lane === player.lane && player.x + player.width >= st.x && player.x < st.x + 40 );
+        if (e.key === 'ArrowUp' && s && s.type === 'UP') { player.transitionTargetLane = player.lane - 1; player.isChangingLane = true; player.activeStairId = s.id; }
+        else if (e.key === 'ArrowDown' && s && s.type === 'DOWN') { player.transitionTargetLane = player.lane + 1; player.isChangingLane = true; player.activeStairId = s.id; }
+    }
+});
+
+function startGame() { 
+    gameState = 'PLAYING'; 
+    isPaused = false; 
+    document.getElementById('titleScreen').style.display = 'none'; 
+    hp = 3; 
+    deliveryQuota = 10; 
+    updateHPDisplay(); 
+    updateMissionUI(); 
+}
+
+generateObjects();
+canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+update();
+
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('resumeBtn').addEventListener('click', () => { 
+    isPaused = false; 
+    document.getElementById('pauseScreen').style.display = 'none'; 
+});
+document.getElementById('backToTitleBtn').addEventListener('click', () => { location.reload(); });
+</script>
+</body>
+</html>
