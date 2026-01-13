@@ -29,6 +29,19 @@
         #timeVal { color: #ff4444; font-size: 1.2em; font-weight: bold; }
         #hpVal { color: #ff44aa; font-size: 1.2em; }
 
+        /* 警告メッセージのスタイル */
+        #warningUI {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: #ff0000; font-size: 80px; font-weight: bold; z-index: 30;
+            display: none; pointer-events: none; text-shadow: 0 0 20px rgba(255,0,0,0.5);
+            animation: blink 0.2s infinite alternate;
+        }
+
+        @keyframes blink {
+            from { opacity: 1; }
+            to { opacity: 0.5; }
+        }
+
         .overlay {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -71,13 +84,15 @@
         <div id="boxContainer" style="display: flex; gap: 5px;"></div>
     </div>
 
+    <div id="warningUI">残り10秒</div>
+
     <div id="titleScreen" class="overlay">
         <div class="overlay-msg">Kyarazon RUN</div>
         <div class="instruction-card">
             <h3>難易度を選択して配達開始！</h3>
             <p>制限時間内に指定された数の荷物を届けてください。</p>
             <p><span class="highlight">操作:</span> [↑][↓]で階段移動、[Space]でジャンプ。</p>
-            <p><span class="highlight">スター:</span> 10秒間虹色無敵！障害物をすり抜けます。</p>
+            <p><span class="highlight">スター:</span> 10秒間虹色無敵＆スピードアップ！障害物をすり抜けます。</p>
             <p><span class="highlight">ルール:</span> すべてのものを時間内に家に届けたらCLEAR！</p>
         </div>
         <div class="btn-container">
@@ -111,6 +126,7 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const boxContainer = document.getElementById('boxContainer');
+const warningUI = document.getElementById('warningUI');
 
 const LANE_COUNT = 3;
 const LANE_HEIGHT = 120;
@@ -125,6 +141,7 @@ let hp = 3;
 let deliveryQuota = 10;
 let invincibleFrame = 0;
 let starActiveTime = 0;
+let warningShown = false; // 10秒警告を出したかどうかのフラグ
 
 const player = {
     x: 100, lane: 1, currentY: 0, jumpY: 0, jumpVY: 0, isJumping: false,
@@ -140,14 +157,14 @@ function generateObjects(level) {
         case 'EASY':
             deliveryQuota = 5;
             timeLeft = 180.0;
-            hp = 5; // EASYのHP設定
+            hp = 5;
             houseInterval = 1300;
             starFrequency = 6000;
             break;
         case 'HARD':
             deliveryQuota = 15;
             timeLeft = 90.0;
-            hp = 1; // HARDのHP設定
+            hp = 1;
             houseInterval = 3000;
             starFrequency = 15000;
             break;
@@ -155,7 +172,7 @@ function generateObjects(level) {
         default:
             deliveryQuota = 10;
             timeLeft = 120.0;
-            hp = 3; // NORMALのHP設定
+            hp = 3;
             houseInterval = 2000;
             starFrequency = 9000;
             break;
@@ -314,20 +331,40 @@ function drawHouseDetailed(ctx, h, centerY) {
 function update() {
     if (gameState === 'PLAYING' && !isPaused) {
         timeLeft -= 1/60; 
-        if (timeLeft <= 0) { gameState = 'GAMEOVER'; document.getElementById('gameOverScreen').style.display = 'flex'; }
+
+        // 残り10秒警告の処理
+        if (!warningShown && timeLeft <= 10 && timeLeft > 0) {
+            warningShown = true;
+            warningUI.style.display = 'block';
+            setTimeout(() => {
+                warningUI.style.display = 'none';
+            }, 1000); // 1秒間表示
+        }
+
+        if (timeLeft <= 0) { 
+            gameState = 'GAMEOVER'; 
+            warningUI.style.display = 'none';
+            document.getElementById('gameOverScreen').style.display = 'flex'; 
+        }
         document.getElementById('timeVal').innerText = Math.max(0, timeLeft).toFixed(2);
         
         if (invincibleFrame > 0) invincibleFrame--;
         if (starActiveTime > 0) starActiveTime--;
         moveSpeed += 0.0003;
         
+        // スター状態の時は移動速度を1.5倍にする
+        let currentMoveSpeed = moveSpeed;
+        if (starActiveTime > 0) {
+            currentMoveSpeed *= 1.5;
+        }
+
         let speedPenalty = 1.0;
         pedestrians.forEach(p => {
             p.x += p.speed;
             if (starActiveTime <= 0 && !player.isJumping && player.lane === 1 && Math.abs(player.x - p.x) < 35) speedPenalty *= 0.82; 
         });
 
-        player.x += moveSpeed * speedPenalty;
+        player.x += currentMoveSpeed * speedPenalty;
         const centerY = canvas.height / 2;
         let baseTargetY = centerY + (player.lane - 1) * LANE_HEIGHT;
 
@@ -420,7 +457,6 @@ function draw() {
 }
 
 function updateHPDisplay() { 
-    // 現在のHP分だけハートを表示。0以下ならDEAD
     document.getElementById('hpVal').innerText = hp > 0 ? "❤️".repeat(hp) : "DEAD"; 
 }
 
@@ -454,16 +490,16 @@ window.addEventListener('keydown', e => {
 function startGame(level) { 
     gameState = 'PLAYING'; 
     isPaused = false; 
+    warningShown = false; // フラグリセット
+    warningUI.style.display = 'none';
     document.getElementById('titleScreen').style.display = 'none'; 
     
     player.x = 100;
     player.lane = 1;
     moveSpeed = INITIAL_SPEED;
     
-    // 難易度に応じたオブジェクト生成（ここでHPも設定されます）
     generateObjects(level); 
     
-    // UIの初期表示更新
     updateHPDisplay(); 
     updateMissionUI(); 
     document.getElementById('timeVal').innerText = timeLeft.toFixed(2);
